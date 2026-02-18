@@ -1,1 +1,7 @@
 .venv
+tmpclaude*
+__pycache__/
+rl_agent_epoch*
+/checkpoints/
+/eval_results/tb/
+/rl_defence_out/tb/
