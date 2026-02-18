@@ -1,0 +1,12 @@
+#pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+torch
+torchvision
+torchattacks
+datasets
+huggingface-hub
+Pillow
+opencv-python
+numpy
+scikit-learn
+tqdm
+tensorboard
