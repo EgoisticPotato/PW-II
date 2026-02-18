@@ -10,3 +10,8 @@ numpy
 scikit-learn
 tqdm
 tensorboard
+scipy
+gym
+gymnasium
+stable-baselines3
+matplotlib
