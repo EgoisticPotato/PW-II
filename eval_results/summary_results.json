@@ -19,28 +19,28 @@
     "bim+bitdepth": 0.0,
     "bim+rl": 0.0,
     "pgd+none": 0.0,
-    "pgd+gaussian": 2.4830699774266365,
-    "pgd+jpeg": 0.45146726862302483,
-    "pgd+median": 0.22573363431151242,
+    "pgd+gaussian": 3.160270880361174,
+    "pgd+jpeg": 0.0,
+    "pgd+median": 0.45146726862302483,
     "pgd+bitdepth": 0.0,
-    "pgd+rl": 0.45146726862302483
+    "pgd+rl": 1.1286681715575622
   },
   "perturbation_stats": {
     "fgsm": {
-      "l2_mean": 11.441775489876017,
-      "l2_std": 0.46315058993037095,
+      "l2_mean": 11.441778292774346,
+      "l2_std": 0.46313970364959,
       "linf_mean": 0.03137257695198059,
       "linf_std": 0.0
     },
     "bim": {
-      "l2_mean": 8.913827583967429,
-      "l2_std": 0.3054843684797534,
+      "l2_mean": 8.916336947585336,
+      "l2_std": 0.30277877033249356,
       "linf_mean": 0.03137257695198059,
       "linf_std": 0.0
     },
     "pgd": {
-      "l2_mean": 9.019068457472136,
-      "l2_std": 0.29556014141279724,
+      "l2_mean": 9.014908927288873,
+      "l2_std": 0.2940647827802305,
       "linf_mean": 0.03137257695198059,
       "linf_std": 0.0
     }
@@ -97,29 +97,29 @@
       "significant_005": false
     },
     "pgd_rl_vs_none": {
-      "mcnemar_chi2": 2.0,
-      "p_value": 0.157299,
-      "significant_005": false
+      "mcnemar_chi2": 5.0,
+      "p_value": 0.025347,
+      "significant_005": true
     },
     "pgd_rl_vs_gaussian": {
-      "mcnemar_chi2": 9.0,
-      "p_value": 0.0027,
+      "mcnemar_chi2": 7.3636,
+      "p_value": 0.006656,
       "significant_005": true
     },
     "pgd_rl_vs_jpeg": {
-      "mcnemar_chi2": 0.0,
-      "p_value": 1.0,
-      "significant_005": false
+      "mcnemar_chi2": 5.0,
+      "p_value": 0.025347,
+      "significant_005": true
     },
     "pgd_rl_vs_median": {
-      "mcnemar_chi2": 0.3333,
-      "p_value": 0.563703,
+      "mcnemar_chi2": 3.0,
+      "p_value": 0.083265,
       "significant_005": false
     },
     "pgd_rl_vs_bitdepth": {
-      "mcnemar_chi2": 2.0,
-      "p_value": 0.157299,
-      "significant_005": false
+      "mcnemar_chi2": 5.0,
+      "p_value": 0.025347,
+      "significant_005": true
     }
   },
   "rl_defense_frequency": {
