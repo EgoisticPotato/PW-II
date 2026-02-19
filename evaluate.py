@@ -82,7 +82,7 @@ class FullEvaluator:
         self.tb_log_dir = tb_log_dir
         os.makedirs(out_dir, exist_ok=True)
 
-        # Classifier
+        # ── Classifier ────────────────────────────────────────────
         self.classifier = EfficientNetB0_GCBAM(num_classes=NUM_CLASSES,
                                                 pretrained=False).to(device)
         ckpt = torch.load(classifier_weights_path, map_location=device)
@@ -94,13 +94,14 @@ class FullEvaluator:
         for p in self.classifier.parameters():
             p.requires_grad = False
 
-        # RL agent
+        # ── RL agent ──────────────────────────────────────────────
         self.agent = DQNAgent(state_dim=STATE_DIM, num_actions=NUM_ACTIONS,
                               device=str(device))
         self.agent.load(rl_agent_path)
-        self.agent.policy_net.eval()
+        # online_net is the correct attribute in the updated DQNAgent
+        self.agent.online_net.eval()
 
-        # Attacks
+        # ── Attacks ───────────────────────────────────────────────
         self.attacks = {
             "fgsm": FGSM(self.classifier, eps=8/255),
             "bim":  BIM(self.classifier, eps=8/255, alpha=2/255, steps=15),
@@ -111,16 +112,16 @@ class FullEvaluator:
         self.test_loader = test_loader
         self.writer = SummaryWriter(log_dir=os.path.join(out_dir, "tb"))
 
-    # ───────────────────────── main entry ──────────────────────
+    # ─────────────────────── main entry ──────────────────────────
     def evaluate_all(self):
         print(f"\n{'='*60}")
         print("  Full Evaluation: Static vs Dynamic (RL) Defense")
         print(f"{'='*60}\n")
 
-        results = {}          # (cond, defense) -> {preds, labels, correct}
-        rl_actions = {}       # cond -> list of actions chosen by RL agent
-        perturbation_data = {}  # atk -> list of (L2, Linf) per image
-        attention_samples = {}  # for attention-map visualisation
+        results = {}
+        rl_actions = {}
+        perturbation_data = {}
+        attention_samples = {}
 
         for cond in CONDITIONS:
             print(f"\n── Condition: {cond} ──")
@@ -140,13 +141,13 @@ class FullEvaluator:
                     labels = labels.to(self.device)
                     B = images.size(0)
 
-                    # ---- attack (or clean) ----
+                    # ── Attack (or clean passthrough) ──
                     if cond == "clean":
                         x_input = images
                     else:
                         x_input = self.attacks[cond](images, labels).clamp(0, 1)
 
-                    # perturbation stats (once per condition)
+                    # ── Perturbation stats (once per attack condition) ──
                     if cond != "clean" and defense == "none":
                         diff = (x_input - images).view(B, -1)
                         for i in range(B):
@@ -155,7 +156,7 @@ class FullEvaluator:
                             perturbation_data[cond]["linf"].append(
                                 diff[i].abs().max().item())
 
-                    # ---- defense ----
+                    # ── Defense ──
                     if defense == "rl":
                         states_np = compute_state_features_batch(
                             x_input, self.classifier, self.device
@@ -168,7 +169,7 @@ class FullEvaluator:
                         fn = _STATIC_FNS[defense]
                         defended = fn(x_input)
 
-                    # ---- classify ----
+                    # ── Classify ──
                     with torch.no_grad():
                         logits = self.classifier(defended.to(self.device))
                         preds = logits.argmax(dim=1)
@@ -177,14 +178,14 @@ class FullEvaluator:
                     all_labels.extend(labels.cpu().tolist())
                     all_correct.extend(preds.eq(labels).cpu().tolist())
 
-                    # save a few samples for attention maps
-                    if (cond in ("pgd",) and defense in ("none", "rl")
+                    # ── Attention samples (for PGD visualisation) ──
+                    if (cond == "pgd" and defense in ("none", "rl")
                             and len(attention_samples.get((cond, defense), [])) < 5):
                         key = (cond, defense)
                         attention_samples.setdefault(key, [])
                         for i in range(min(2, B)):
                             attention_samples[key].append({
-                                "clean": images[i].cpu(),
+                                "clean":    images[i].cpu(),
                                 "attacked": x_input[i].cpu(),
                                 "defended": defended[i].cpu(),
                             })
@@ -195,7 +196,7 @@ class FullEvaluator:
                     "correct": all_correct,
                 }
 
-        # ── Compute & save everything ─────────────────────────────
+        # ── Metrics & plots ───────────────────────────────────────
         acc_table = self._accuracy_table(results)
         per_class = self._per_class_accuracy(results)
         conf_mats = self._confusion_matrices(results)
@@ -218,13 +219,15 @@ class FullEvaluator:
                 for j, d in enumerate(ALL_DEFENSES)
             },
             "perturbation_stats": {
-                atk: {"l2_mean": float(np.mean(v["l2"])),
-                       "l2_std": float(np.std(v["l2"])),
-                       "linf_mean": float(np.mean(v["linf"])),
-                       "linf_std": float(np.std(v["linf"]))}
+                atk: {
+                    "l2_mean":   float(np.mean(v["l2"])),
+                    "l2_std":    float(np.std(v["l2"])),
+                    "linf_mean": float(np.mean(v["linf"])),
+                    "linf_std":  float(np.std(v["linf"])),
+                }
                 for atk, v in perturbation_data.items()
             },
-            "statistical_tests": sig_tests,
+            "statistical_tests":    sig_tests,
             "rl_defense_frequency": rl_freq,
         }
         with open(os.path.join(self.out_dir, "summary_results.json"), "w") as f:
@@ -236,7 +239,7 @@ class FullEvaluator:
         print(f"{'='*60}")
         self._print_accuracy_table(acc_table)
 
-    # ═══════════════════ metric computation ═══════════════════
+    # ═══════════════════ metric computation ═══════════════════════
     def _accuracy_table(self, results) -> np.ndarray:
         table = np.zeros((len(CONDITIONS), len(ALL_DEFENSES)))
         for i, c in enumerate(CONDITIONS):
@@ -248,13 +251,15 @@ class FullEvaluator:
     def _per_class_accuracy(self, results) -> dict:
         out = {}
         for (c, d), r in results.items():
-            pca = [0.0] * NUM_CLASSES
+            pca = []
             for cls in range(NUM_CLASSES):
                 mask = [l == cls for l in r["labels"]]
                 total = sum(mask)
                 if total > 0:
                     correct = sum(co for co, m in zip(r["correct"], mask) if m)
-                    pca[cls] = 100.0 * correct / total
+                    pca.append(100.0 * correct / total)
+                else:
+                    pca.append(0.0)
             out[f"{c}+{d}"] = pca
         return out
 
@@ -270,8 +275,10 @@ class FullEvaluator:
         out = {}
         for cond, acts in rl_actions.items():
             total = max(len(acts), 1)
-            out[cond] = {DEFENSE_NAMES[a]: acts.count(a) / total
-                         for a in range(NUM_ACTIONS)}
+            out[cond] = {
+                DEFENSE_NAMES[a]: acts.count(a) / total
+                for a in range(NUM_ACTIONS)
+            }
         return out
 
     def _statistical_tests(self, results) -> dict:
@@ -282,22 +289,21 @@ class FullEvaluator:
             rl_corr = results[(cond, "rl")]["correct"]
             for sd in STATIC_DEFENSES:
                 st_corr = results[(cond, sd)]["correct"]
-                # McNemar's test
                 b = sum(s and not r for s, r in zip(st_corr, rl_corr))
                 c = sum(r and not s for s, r in zip(st_corr, rl_corr))
                 if b + c > 0:
-                    chi2 = (b - c) ** 2 / (b + c)
+                    chi2  = (b - c) ** 2 / (b + c)
                     p_val = 1.0 - scipy_stats.chi2.cdf(chi2, df=1)
                 else:
                     chi2, p_val = 0.0, 1.0
                 out[f"{cond}_rl_vs_{sd}"] = {
-                    "mcnemar_chi2": round(chi2, 4),
-                    "p_value": round(p_val, 6),
+                    "mcnemar_chi2":    round(chi2, 4),
+                    "p_value":         round(p_val, 6),
                     "significant_005": bool(p_val < 0.05),
                 }
         return out
 
-    # ═══════════════════ plotting helpers ═════════════════════
+    # ═══════════════════ plotting ══════════════════════════════════
     def _plot_accuracy_heatmap(self, table):
         fig, ax = plt.subplots(figsize=(10, 5))
         im = ax.imshow(table, cmap="YlGn", vmin=0, vmax=100)
@@ -309,8 +315,8 @@ class FullEvaluator:
             for j in range(len(ALL_DEFENSES)):
                 ax.text(j, i, f"{table[i,j]:.1f}%", ha="center", va="center",
                         fontsize=9,
-                        color="white" if table[i,j] < 50 else "black")
-        ax.set_title("Accuracy: Condition x Defense")
+                        color="white" if table[i, j] < 50 else "black")
+        ax.set_title("Accuracy: Condition × Defense")
         fig.colorbar(im, ax=ax, label="Accuracy (%)")
         fig.tight_layout()
         fig.savefig(os.path.join(self.out_dir, "accuracy_heatmap.png"), dpi=150)
@@ -321,8 +327,8 @@ class FullEvaluator:
         width = 0.12
         fig, ax = plt.subplots(figsize=(12, 6))
         for j, d in enumerate(ALL_DEFENSES):
-            offset = (j - len(ALL_DEFENSES)/2 + 0.5) * width
-            bars = ax.bar(x + offset, table[:, j], width, label=d)
+            offset = (j - len(ALL_DEFENSES) / 2 + 0.5) * width
+            ax.bar(x + offset, table[:, j], width, label=d)
         ax.set_xlabel("Input Condition")
         ax.set_ylabel("Accuracy (%)")
         ax.set_title("Per-Attack Accuracy by Defense Strategy")
@@ -341,8 +347,8 @@ class FullEvaluator:
             width = 0.12
             for j, d in enumerate(ALL_DEFENSES):
                 key = f"{cond}+{d}"
-                vals = per_class.get(key, [0]*NUM_CLASSES)
-                offset = (j - len(ALL_DEFENSES)/2 + 0.5) * width
+                vals = per_class.get(key, [0] * NUM_CLASSES)
+                offset = (j - len(ALL_DEFENSES) / 2 + 0.5) * width
                 ax.bar(x + offset, vals, width, label=d)
             ax.set_xlabel("Class")
             ax.set_ylabel("Accuracy (%)")
@@ -359,13 +365,12 @@ class FullEvaluator:
     def _plot_confusion_matrices(self, conf_mats):
         key_combos = [(c, d) for c in ["pgd", "fgsm"]
                       for d in ["none", "gaussian", "rl"]]
-        ncols = 3
-        nrows = 2
-        fig, axes = plt.subplots(nrows, ncols, figsize=(4*ncols, 4*nrows))
+        ncols, nrows = 3, 2
+        fig, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4 * nrows))
         for idx, (c, d) in enumerate(key_combos):
             ax = axes[idx // ncols, idx % ncols]
             cm = np.array(conf_mats[f"{c}+{d}"])
-            im = ax.imshow(cm, cmap="Blues")
+            ax.imshow(cm, cmap="Blues")
             ax.set_title(f"{c}+{d}", fontsize=9)
             ax.set_xticks(range(NUM_CLASSES))
             ax.set_yticks(range(NUM_CLASSES))
@@ -382,29 +387,31 @@ class FullEvaluator:
 
     def _plot_defense_frequency(self, freq):
         attack_conds = [c for c in CONDITIONS if c != "clean"]
-        fig, ax = plt.subplots(figsize=(10, 5))
+        fig, ax = plt.subplots(figsize=(12, 5))
         x = np.arange(len(attack_conds))
-        width = 0.15
+        width = 0.08
         for j, dname in enumerate(DEFENSE_NAMES):
             vals = [freq.get(c, {}).get(dname, 0) * 100 for c in attack_conds]
-            offset = (j - len(DEFENSE_NAMES)/2 + 0.5) * width
+            offset = (j - len(DEFENSE_NAMES) / 2 + 0.5) * width
             ax.bar(x + offset, vals, width, label=dname)
         ax.set_xlabel("Attack Condition")
         ax.set_ylabel("Selection Frequency (%)")
         ax.set_title("RL Agent Defense Selection Frequency by Attack")
         ax.set_xticks(x)
         ax.set_xticklabels(attack_conds)
-        ax.legend(fontsize=8)
+        ax.legend(fontsize=7, ncol=2)
         fig.tight_layout()
         fig.savefig(os.path.join(self.out_dir, "defense_frequency.png"), dpi=150)
         plt.close(fig)
 
     def _plot_perturbation_analysis(self, pdata):
+        if not pdata:
+            return
         attacks = list(pdata.keys())
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
         for ax, metric, title in [
-            (axes[0], "l2", "L2 Perturbation Norm"),
-            (axes[1], "linf", "L-inf Perturbation Norm"),
+            (axes[0], "l2",   "L2 Perturbation Norm"),
+            (axes[1], "linf", "L∞ Perturbation Norm"),
         ]:
             data = [pdata[a][metric] for a in attacks]
             ax.boxplot(data, tick_labels=attacks)
@@ -416,19 +423,17 @@ class FullEvaluator:
         plt.close(fig)
 
     def _plot_attention_maps(self, samples):
-        """Visualise CBAM spatial attention on clean / attacked / defended."""
         if not samples:
             return
-
         key_none = ("pgd", "none")
         key_rl   = ("pgd", "rl")
         items_none = samples.get(key_none, [])[:3]
-        items_rl   = samples.get(key_rl, [])[:3]
+        items_rl   = samples.get(key_rl,   [])[:3]
         n = min(len(items_none), len(items_rl), 3)
         if n == 0:
             return
 
-        fig, axes = plt.subplots(n, 5, figsize=(15, 3*n))
+        fig, axes = plt.subplots(n, 5, figsize=(15, 3 * n))
         if n == 1:
             axes = axes[np.newaxis, :]
         col_titles = ["Clean", "PGD Attacked", "Attn (attacked)",
@@ -440,12 +445,11 @@ class FullEvaluator:
             clean_img = items_none[i]["clean"]
             atk_img   = items_none[i]["attacked"]
             def_img   = items_rl[i]["defended"]
-
-            attn_atk = self._get_attention_map(atk_img)
-            attn_def = self._get_attention_map(def_img)
+            attn_atk  = self._get_attention_map(atk_img)
+            attn_def  = self._get_attention_map(def_img)
 
             for j, img in enumerate([clean_img, atk_img, attn_atk,
-                                     def_img, attn_def]):
+                                      def_img, attn_def]):
                 ax = axes[i, j]
                 if img.dim() == 3 and img.shape[0] <= 3:
                     ax.imshow(img.permute(1, 2, 0).clamp(0, 1).numpy())
@@ -459,12 +463,11 @@ class FullEvaluator:
         plt.close(fig)
 
     def _get_attention_map(self, image: torch.Tensor) -> torch.Tensor:
-        """Extract CBAM spatial attention map for a single image."""
+        """Extract CBAM spatial attention map for a single (C,H,W) image."""
         x = image.unsqueeze(0).to(self.device)
         with torch.no_grad():
             feat = self.classifier.features(x)
             feat = self.classifier.ghost(feat)
-            # CBAM channel then spatial
             feat = feat * self.classifier.cbam.channel_attention(feat)
             attn = self.classifier.cbam.spatial_attention(feat)  # (1,1,H,W)
         attn = F.interpolate(attn, size=(224, 224), mode="bilinear",
@@ -472,7 +475,6 @@ class FullEvaluator:
         return attn.squeeze().cpu()
 
     def _plot_training_curves(self):
-        """Load training curves from TensorBoard event files."""
         log_dir = self.tb_log_dir
         if log_dir is None:
             log_dir = os.path.join(
@@ -486,7 +488,7 @@ class FullEvaluator:
                 EventAccumulator,
             )
         except ImportError:
-            print("  [skip] tensorboard package needed for curve extraction")
+            print("  [skip] install tensorboard to extract training curves")
             return
 
         ea = EventAccumulator(log_dir)
@@ -494,9 +496,10 @@ class FullEvaluator:
         tags = ea.Tags().get("scalars", [])
 
         for tag, fname, ylabel in [
-            ("train/reward_epoch",   "reward_curve.png",  "Mean Reward"),
-            ("train/loss_epoch",     "dqn_loss.png",      "DQN Loss"),
-            ("train/accuracy_epoch", "train_accuracy.png", "Accuracy (%)"),
+            ("train/reward_epoch",    "reward_curve.png",   "Mean Reward"),
+            ("train/loss_epoch",      "dqn_loss.png",       "DQN Loss"),
+            ("train/accuracy_epoch",  "train_accuracy.png", "Accuracy (%)"),
+            ("val/accuracy_overall",  "val_accuracy.png",   "Val Accuracy (%)"),
         ]:
             if tag not in tags:
                 continue
@@ -504,7 +507,7 @@ class FullEvaluator:
             steps = [e.step for e in events]
             vals  = [e.value for e in events]
             fig, ax = plt.subplots(figsize=(8, 4))
-            ax.plot(steps, vals)
+            ax.plot(steps, vals, marker="o", markersize=3)
             ax.set_xlabel("Epoch")
             ax.set_ylabel(ylabel)
             ax.set_title(tag.replace("/", " / "))
@@ -512,7 +515,6 @@ class FullEvaluator:
             fig.savefig(os.path.join(self.out_dir, fname), dpi=150)
             plt.close(fig)
 
-        # Epsilon decay (per-step)
         if "train/epsilon" in tags:
             events = ea.Scalars("train/epsilon")
             steps = [e.step for e in events]
@@ -521,22 +523,19 @@ class FullEvaluator:
             ax.plot(steps, vals)
             ax.set_xlabel("Step")
             ax.set_ylabel("Epsilon")
-            ax.set_title("Epsilon Decay")
+            ax.set_title("Epsilon Decay (cosine)")
             fig.tight_layout()
             fig.savefig(os.path.join(self.out_dir, "epsilon_decay.png"), dpi=150)
             plt.close(fig)
 
-    # ═══════════════════ pretty-print ════════════════════════
+    # ═══════════════════ pretty-print ════════════════════════════
     def _print_accuracy_table(self, table):
-        print(f"\n{'':10s}", end="")
-        for d in ALL_DEFENSES:
-            print(f"{d:>10s}", end="")
-        print()
+        header = f"{'':10s}" + "".join(f"{d:>10s}" for d in ALL_DEFENSES)
+        print(header)
+        print("-" * len(header))
         for i, c in enumerate(CONDITIONS):
-            print(f"{c:10s}", end="")
-            for j in range(len(ALL_DEFENSES)):
-                print(f"{table[i,j]:9.1f}%", end="")
-            print()
+            row = f"{c:10s}" + "".join(f"{table[i,j]:9.1f}%" for j in range(len(ALL_DEFENSES)))
+            print(row)
         print()
 
 
@@ -549,10 +548,10 @@ def main():
                         default="model_weights.pt")
     parser.add_argument("--rl_agent_path", type=str,
                         default="rl_defense_out/rl_agent_final.pth")
-    parser.add_argument("--batch_size", type=int, default=8)
-    parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--out_dir", type=str, default="eval_results")
-    parser.add_argument("--tb_log_dir", type=str, default=None,
+    parser.add_argument("--batch_size",   type=int, default=8)
+    parser.add_argument("--num_workers",  type=int, default=0)
+    parser.add_argument("--out_dir",      type=str, default="eval_results")
+    parser.add_argument("--tb_log_dir",   type=str, default=None,
                         help="Path to RL training TensorBoard logs "
                              "(default: rl_defense_out/tb)")
     args = parser.parse_args()
@@ -562,9 +561,13 @@ def main():
 
     _, _, test_dataset = load_fetal_planes_hf(
         train_ratio=0.70, val_ratio=0.15, seed=42)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
-                             shuffle=False, num_workers=args.num_workers,
-                             pin_memory=True)
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=(device.type == "cuda"),
+    )
 
     evaluator = FullEvaluator(
         classifier_weights_path=args.classifier_weights,
